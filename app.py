@@ -42,8 +42,8 @@ h1, h2, h3 {
 # -------------------------------
 # LOAD MODEL
 # -------------------------------
-model = load_model("models/audio_model_final.keras")
-scaler = joblib.load("models/scaler.pkl")
+model = load_model("audio_model_final.keras")
+scaler = joblib.load("scaler.pkl")
 
 # -------------------------------
 # FEATURE EXTRACTION
