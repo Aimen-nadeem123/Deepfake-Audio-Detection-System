@@ -42,7 +42,7 @@ h1, h2, h3 {
 # -------------------------------
 # LOAD MODEL
 # -------------------------------
-model = load_model("models/audio_model_final.keras", compile=False)
+model = load_model("audio_model_final.keras", compile=False)
 
 scaler = joblib.load("scaler.pkl")
 
