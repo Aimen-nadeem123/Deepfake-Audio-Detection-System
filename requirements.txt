@@ -1,9 +1,8 @@
-streamlit
-numpy
-librosa
-joblib
-pandas
-tensorflow
+streamlit==1.32.0
+numpy==1.23.5
+librosa==0.10.0
+joblib==1.3.2
+pandas==1.5.3
+tensorflow==2.12.0
+scikit-learn==1.3.2
 st-audiorec
-scikit-learn
-soundfile
