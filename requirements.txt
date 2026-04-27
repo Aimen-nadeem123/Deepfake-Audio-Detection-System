@@ -4,4 +4,4 @@ librosa
 numpy
 scikit-learn
 joblib
-st-audiorec
+streamlit-audiorecorder
