@@ -9,7 +9,7 @@ import os
 from tensorflow.keras.models import load_model
 
 # 🔥 RECORDING LIBRARY
-from st_audiorec import st_audiorec
+from audiorecorder import audiorecorder
 
 # -------------------------------
 # CONFIG + STYLE
@@ -174,9 +174,10 @@ if uploaded_file is not None:
 st.markdown("---")
 st.subheader("🎤 Record Real-Time Audio")
 
-audio_bytes = st_audiorec()
+audio = audiorecorder("Click to record", "Recording...")
 
-if audio_bytes is not None:
+if len(audio) > 0:
+    audio_bytes = audio.export().read()
     st.audio(audio_bytes, format="audio/wav")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
