@@ -165,7 +165,7 @@ print(classification_report(y_test, pred))
 # SAVE
 # -------------------------------
 os.makedirs("models", exist_ok=True)
-model.save("models/audio_model_final.h5")
+model.save("audio_model_final.h5")
 
 print("✅ MODEL SAVED")
 print("✅ TRAINING COMPLETE")
