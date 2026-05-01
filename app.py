@@ -57,7 +57,7 @@ st.markdown("""
 # -------------------------------
 @st.cache_resource
 def get_model():
-    return load_model("models/audio_model_final.h5")
+    return load_model("audio_model_final.h5")
 
 model = get_model()
 
