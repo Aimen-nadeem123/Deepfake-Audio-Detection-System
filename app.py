@@ -1,196 +1,152 @@
 import streamlit as st
 import numpy as np
 import librosa
-import joblib
 import tempfile
 import pandas as pd
 from datetime import datetime
 import os
 from tensorflow.keras.models import load_model
-
-# 🔥 RECORDING LIBRARY
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 from audiorecorder import audiorecorder
 
 # -------------------------------
-# CONFIG + STYLE
+# CONFIG + THEME STYLE
 # -------------------------------
-st.set_page_config(page_title="Deepfake Audio Detection", layout="centered")
+st.set_page_config(page_title="Deepfake Audio Detection", layout="wide")
 
 st.markdown("""
 <style>
-.main {
-    background-color: #0E1117;
-}
-h1, h2, h3 {
-    color: white;
-}
-.stButton>button {
-    background-color: #ff4b4b;
-    color: white;
-    border-radius: 8px;
-    height: 3em;
-    width: 100%;
-}
-.stFileUploader {
-    border: 2px dashed #444;
-    padding: 15px;
-    border-radius: 10px;
-}
+    .stApp {
+        background: radial-gradient(circle at center, #0a192f 0%, #020c1b 100%);
+        color: #64ffda;
+    }
+    .header-container {
+        display: flex; flex-direction: row; align-items: center; justify-content: center; 
+        padding: 2rem; background: rgba(10, 25, 47, 0.8); border: 1px solid #64ffda33;
+        border-radius: 20px; margin-bottom: 2rem; gap: 30px; 
+    }
+    .site-title {
+        font-family: 'Courier New', Courier, monospace; font-size: 3rem; 
+        font-weight: bold; color: #64ffda; text-shadow: 0 0 15px #64ffda77; margin: 0;
+    }
+    .result-panel {
+        background: rgba(100, 255, 218, 0.05); border: 1px solid #64ffda33;
+        border-radius: 15px; padding: 20px; margin-top: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # -------------------------------
-# LOAD MODEL
+# HEADER
 # -------------------------------
-model = load_model("audio_model_final.keras", compile=False)
+st.markdown("""
+<div class="header-container">
+    <div style="width: 100px;">
+        <svg viewBox="0 0 100 120">
+            <rect x="10" y="40" width="15" height="40" fill="#64ffda"><animate attributeName="height" values="40;80;40" dur="0.6s" repeatCount="indefinite" /><animate attributeName="y" values="40;20;40" dur="0.6s" repeatCount="indefinite" /></rect>
+            <rect x="40" y="20" width="15" height="80" fill="#64ffda"><animate attributeName="height" values="80;120;80" dur="0.8s" repeatCount="indefinite" /><animate attributeName="y" values="20;0;20" dur="0.8s" repeatCount="indefinite" /></rect>
+            <rect x="70" y="30" width="15" height="60" fill="#64ffda"><animate attributeName="height" values="60;100;60" dur="0.5s" repeatCount="indefinite" /><animate attributeName="y" values="30;10;30" dur="0.5s" repeatCount="indefinite" /></rect>
+        </svg>
+    </div>
+    <h1 class="site-title">DEEPFAKE AUDIO DETECTION</h1>
+</div>
+""", unsafe_allow_html=True)
 
-scaler = joblib.load("scaler.pkl")
+# -------------------------------
+# ORIGINAL CORE LOGIC
+# -------------------------------
+@st.cache_resource
+def get_model():
+    return load_model("models/audio_model_final.h5")
 
-# -------------------------------
-# FEATURE EXTRACTION
-# -------------------------------
+model = get_model()
+
 def extract_features(audio, sr):
     mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=40)
-    delta = librosa.feature.delta(mfcc)
-    delta2 = librosa.feature.delta(mfcc, order=2)
+    return mfcc.T  
 
-    return np.hstack([
-        np.mean(mfcc.T, axis=0),
-        np.mean(delta.T, axis=0),
-        np.mean(delta2.T, axis=0)
-    ])
-
-# -------------------------------
-# PREDICTION FUNCTION
-# -------------------------------
 def predict_audio(file_path):
+    # --- Exact Original Processing ---
     audio, sr = librosa.load(file_path, sr=22050)
     audio, _ = librosa.effects.trim(audio)
     audio = librosa.util.normalize(audio)
 
     chunk_size = 2 * sr
-    predictions = []
+    features = []
 
     for i in range(0, len(audio), chunk_size):
         chunk = audio[i:i + chunk_size]
-
         if len(chunk) < chunk_size:
             chunk = np.pad(chunk, (0, chunk_size - len(chunk)))
-
         feat = extract_features(chunk, sr)
-        feat = scaler.transform([feat])
-        feat = np.expand_dims(feat, axis=2)
+        features.append(feat)
 
-        pred = model.predict(feat, verbose=0)[0][0]
-        predictions.append(float(pred))
+    features = pad_sequences(features, padding='post', dtype='float32')
+    probs = model.predict(features, verbose=0).flatten()
 
-    # 🔥 SMART DECISION LOGIC
-    max_pred = max(predictions)
-    min_pred = min(predictions)
+    # --- Exact Original Decision Logic ---
+    max_pred = np.max(probs)
+    min_pred = np.min(probs)
 
     if max_pred > 0.9:
         label = "🎙 REAL Audio"
         confidence = max_pred
-
     elif min_pred < 0.1:
         label = "🤖 FAKE Audio"
         confidence = 1 - min_pred
-
     else:
-        real_count = sum(p > 0.5 for p in predictions)
-        fake_count = sum(p <= 0.5 for p in predictions)
-
+        real_count = np.sum(probs > 0.4)
+        fake_count = np.sum(probs <= 0.4)
         if real_count > fake_count:
             label = "🎙 REAL Audio"
-            confidence = real_count / len(predictions)
+            confidence = real_count / len(probs)
         else:
             label = "🤖 FAKE Audio"
-            confidence = fake_count / len(predictions)
+            confidence = fake_count / len(probs)
 
-    return label, confidence, predictions
-
-# -------------------------------
-# SAVE HISTORY (TERMINAL + CSV ONLY)
-# -------------------------------
-def save_history(source, filename, label, confidence):
-    os.makedirs("data", exist_ok=True)
-
-    data = {
-        "source": source,
-        "file": filename,
-        "result": label,
-        "confidence (%)": round(confidence * 100, 2),
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
-
-    # 🔥 PRINT IN TERMINAL
-    print("\n===== NEW PREDICTION =====")
-    for key, value in data.items():
-        print(f"{key}: {value}")
-    print("==========================\n")
-
-    # 🔥 SAVE TO CSV
-    df = pd.DataFrame([data])
-    file_path = "data/history.csv"
-
-    if os.path.exists(file_path):
-        old = pd.read_csv(file_path)
-        df = pd.concat([old, df])
-
-    df.to_csv(file_path, index=False)
+    color = "#64ffda" if "REAL" in label else "#ff4b4b"
+    return label, confidence, probs, color
 
 # -------------------------------
-# UI
+# MAIN LAYOUT
 # -------------------------------
-st.title("🎙 Deepfake Audio Detection System")
-st.markdown("---")
+left_col, right_col = st.columns([1, 1.2], gap="large")
 
-# ===============================
-# 🔹 UPLOAD AUDIO
-# ===============================
-st.subheader("📂 Upload Audio File")
+with left_col:
+    st.markdown("### 📂 ANALYSIS PORT")
+    uploaded_file = st.file_uploader("Upload Audio", type=["wav", "mp3", "ogg"])
+    st.markdown("---")
+    st.markdown("### 🎤 LIVE FEED")
+    recorded_audio = audiorecorder("START RECORDING", "STOP RECORDING")
+    if recorded_audio:
+        st.info(f"✅ Recording Captured: {len(recorded_audio)/1000:.1f}s")
 
-uploaded_file = st.file_uploader("Upload Audio", type=["wav", "mp3", "ogg"])
+with right_col:
+    st.markdown("### 🔍 RESULTS & PREVIEW")
+    
+    # Process Upload
+    if uploaded_file:
+        st.audio(uploaded_file)
+        if st.button("RUN SCAN ON UPLOAD"):
+            with st.spinner("Analyzing..."):
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    tmp.write(uploaded_file.read())
+                    label, confidence, preds, color = predict_audio(tmp.name)
+                st.markdown(f"<div class='result-panel'><h1 style='color:{color};'>{label}</h1><h3>Confidence: {confidence*100:.2f}%</h3><p>Chunks: {[round(p, 3) for p in preds]}</p></div>", unsafe_allow_html=True)
 
-if uploaded_file is not None:
-    st.audio(uploaded_file)
+    # Process Recording
+    if len(recorded_audio) > 0:
+        if uploaded_file: st.markdown("---")
+        audio_bytes = recorded_audio.export().read()
+        st.audio(audio_bytes)
+        if st.button("VERIFY RECORDED SIGNAL"):
+            with st.spinner("Analyzing..."):
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                    tmp.write(audio_bytes)
+                    label, confidence, preds, color = predict_audio(tmp.name)
+                st.markdown(f"<div class='result-panel'><h1 style='color:{color};'>{label}</h1><h3>Confidence: {confidence*100:.2f}%</h3><p>Chunks: {[round(p, 3) for p in preds]}</p></div>", unsafe_allow_html=True)
+    
+    if not uploaded_file and len(recorded_audio) == 0:
+        st.write("Waiting for input...")
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(uploaded_file.read())
-        file_path = tmp.name
-
-    if st.button("🔍 Predict Uploaded Audio"):
-        with st.spinner("Analyzing..."):
-            label, confidence, preds = predict_audio(file_path)
-
-        st.success(label)
-        st.write(f"Confidence: {confidence*100:.2f}%")
-        st.write("Chunks:", [round(p, 3) for p in preds])
-
-        save_history("upload", uploaded_file.name, label, confidence)
-
-# ===============================
-# 🔹 RECORD AUDIO
-# ===============================
-st.markdown("---")
-st.subheader("🎤 Record Real-Time Audio")
-
-audio = audiorecorder("Click to record", "Recording...")
-
-if len(audio) > 0:
-    audio_bytes = audio.export().read()
-    st.audio(audio_bytes, format="audio/wav")
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        tmp.write(audio_bytes)
-        record_path = tmp.name
-
-    if st.button("🎯 Predict Recorded Audio"):
-        with st.spinner("Analyzing recording..."):
-            label, confidence, preds = predict_audio(record_path)
-
-        st.success(label)
-        st.write(f"Confidence: {confidence*100:.2f}%")
-        st.write("Chunks:", [round(p, 3) for p in preds])
-
-        save_history("recorded", "recorded_audio.wav", label, confidence)
+st.markdown("<br><p style='text-align: center; opacity: 0.3;'>SECURED TERMINAL ACCESS</p>", unsafe_allow_html=True)
